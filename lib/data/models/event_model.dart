@@ -8,24 +8,19 @@ class EventModel extends Event {
     required super.description,
     super.thumbnailUrl,
     required super.dateTime,
-    super.isLive,
+    super.isLive = false,
     super.category,
   });
 
   factory EventModel.fromJson(Map<String, dynamic> json) {
     return EventModel(
-      id: json['id'] ?? '',
+      id: json['id'].toString(),
       title: json['title'] ?? '',
       description: json['description'] ?? '',
       thumbnailUrl: json['thumbnail_url'],
-      dateTime: DateTime.parse(json['date_time'] ?? DateTime.now().toIso8601String()),
+      dateTime: DateTime.parse(json['date_time']),
       isLive: json['is_live'] ?? false,
-      category: json['category'] != null
-          ? ServiceCategory.values.firstWhere(
-              (e) => e.name == json['category'],
-              orElse: () => ServiceCategory.sundayService,
-            )
-          : null,
+      category: _parseServiceCategory(json['category']),
     );
   }
 
@@ -39,5 +34,26 @@ class EventModel extends Event {
       'is_live': isLive,
       'category': category?.name,
     };
+  }
+
+  static ServiceCategory? _parseServiceCategory(String? category) {
+    if (category == null) return null;
+    
+    switch (category) {
+      case 'morningDew':
+        return ServiceCategory.morningDew;
+      case 'feastOfGlory':
+        return ServiceCategory.feastOfGlory;
+      case 'wordAndPrayer':
+        return ServiceCategory.wordAndPrayer;
+      case 'schoolOfChrist':
+        return ServiceCategory.schoolOfChrist;
+      case 'kingdomBusiness':
+        return ServiceCategory.kingdomBusiness;
+      case 'sundayService':
+        return ServiceCategory.sundayService;
+      default:
+        return null;
+    }
   }
 }

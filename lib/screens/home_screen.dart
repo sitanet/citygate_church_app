@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/theme/app_theme.dart';
 import '../core/constants/app_constants.dart';
-import '../models/content.dart';
-import '../models/event.dart';
+import '../domain/entities/content.dart';
+import '../domain/entities/event.dart';
+import '../domain/entities/user.dart';  // Add this import
+import '../data/datasources/remote_data_source.dart';
+import '../data/repositories/content_repository_impl.dart';
+import '../data/repositories/auth_repository_impl.dart';  // Add this import
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -14,17 +18,83 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late final PageController _eventsController;
+  late final ContentRepositoryImpl _contentRepository;
+  late final AuthRepositoryImpl _authRepository;  // Add this
+  
+  List<Content> _recentContent = [];
+  List<Event> _upcomingEvents = [];
+  User? _currentUser;  // Add this to store user info
+  bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
     _eventsController = PageController(viewportFraction: 0.86);
+    final remoteDataSource = RemoteDataSource();
+    _contentRepository = ContentRepositoryImpl(
+      remoteDataSource: remoteDataSource,
+    );
+    _authRepository = AuthRepositoryImpl(  // Initialize auth repository
+      remoteDataSource: remoteDataSource,
+    );
+    _loadHomeData();
   }
 
   @override
   void dispose() {
     _eventsController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadHomeData() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+
+      // Load user info and content data in parallel
+      final results = await Future.wait([
+        _contentRepository.getRecentContent(),
+        _contentRepository.getUpcomingEvents(),
+        _getCurrentUser(),
+      ]);
+
+      if (mounted) {
+        setState(() {
+          _recentContent = results[0] as List<Content>;
+          _upcomingEvents = results[1] as List<Event>;
+          _currentUser = results[2] as User?;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString().replaceFirst('Exception: ', '');
+          _isLoading = false;
+          // Clear any existing data on error
+          _recentContent = [];
+          _upcomingEvents = [];
+          _currentUser = null;
+        });
+      }
+    }
+  }
+
+  Future<User?> _getCurrentUser() async {
+    try {
+      return await _authRepository.getCurrentUser();
+    } catch (e) {
+      // If getting current user fails, return null - this is not critical for home screen
+      print('Failed to get current user: $e');
+      return null;
+    }
+  }
+
+  Future<void> _refresh() async {
+    await _loadHomeData();
   }
 
   @override
@@ -39,35 +109,205 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: SafeArea(
           top: false,
-          child: SingleChildScrollView(
+          child: _isLoading 
+              ? _buildLoadingView()
+              : _errorMessage != null 
+                  ? _buildErrorView()
+                  : RefreshIndicator(
+                      onRefresh: _refresh,
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: Column(
+                          children: [
+                            _buildHeader(),
+                            Padding(
+                              padding: const EdgeInsets.all(20),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (_upcomingEvents.isNotEmpty) ...[
+                                    _buildSectionHeader('Upcoming Events'),
+                                    const SizedBox(height: 12),
+                                    _buildUpcomingEvents(_upcomingEvents),
+                                    const SizedBox(height: 28),
+                                  ] else ...[
+                                    _buildEmptyEventsSection(),
+                                    const SizedBox(height: 28),
+                                  ],
+                                  if (_recentContent.isNotEmpty) ...[
+                                    _buildSectionHeader('Recent Activities'),
+                                    const SizedBox(height: 12),
+                                    _buildRecentActivities(_recentContent),
+                                  ] else ...[
+                                    _buildEmptyContentSection(),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingView() {
+    return Column(
+      children: [
+        _buildHeader(),
+        const Expanded(
+          child: Center(
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildHeader(),
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildSectionHeader('Upcoming Events'),
-                      const SizedBox(height: 12),
-                      _buildUpcomingEvents(_getMockUpcomingEvents()),
-                      const SizedBox(height: 28),
-                      _buildSectionHeader('Recent Activities'),
-                      const SizedBox(height: 12),
-                      _buildRecentActivities(_getMockRecentContent()),
-                    ],
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text(
+                  'Loading content...',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 16,
                   ),
                 ),
               ],
             ),
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildErrorView() {
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          children: [
+            _buildHeader(),
+            Container(
+              height: MediaQuery.of(context).size.height * 0.6,
+              padding: const EdgeInsets.all(20),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.cloud_off,
+                      size: 80,
+                      color: AppColors.textSecondary,
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Unable to load content',
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _errorMessage ?? 'Please check your internet connection and server status',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 32),
+                    ElevatedButton.icon(
+                      onPressed: _loadHomeData,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Try Again'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyEventsSection() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.surfaceVariant),
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.event_outlined,
+            size: 48,
+            color: AppColors.textSecondary,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No Upcoming Events',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Check back later for upcoming church events',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: AppColors.textSecondary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyContentSection() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.surfaceVariant),
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.video_library_outlined,
+            size: 48,
+            color: AppColors.textSecondary,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No Recent Activities',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'New content will appear here when available',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: AppColors.textSecondary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildHeader() {
-    const headerHeight = 240.0; // compact to bring events closer
+    const headerHeight = 240.0;
 
     return Container(
       height: headerHeight,
@@ -79,10 +319,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         image: const DecorationImage(
           image: AssetImage('assets/images/home_bg.png'),
-          fit: BoxFit.cover, // fully cover the rounded area
+          fit: BoxFit.cover,
         ),
       ),
-      // LIGHTER overlay to avoid looking too dark
       foregroundDecoration: BoxDecoration(
         borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(16),
@@ -109,13 +348,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: AppColors.success,
+                    color: _hasLiveContent() ? AppColors.live : AppColors.textSecondary,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.circle, size: 8, color: AppColors.textLight),
+                      const SizedBox(width: 4),
+                      Text(
+                        _hasLiveContent() ? 'LIVE' : 'OFFLINE',
+                        style: const TextStyle(
+                          color: AppColors.textLight,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -124,18 +372,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const Spacer(),
 
-            // Centered: Logo + (Welcome / Church / Motto)
             Center(
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
-                children: const [
-                  _LogoBox(),
-                  SizedBox(width: 16),
+                children: [
+                  const _LogoBox(),
+                  const SizedBox(width: 16),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      const Text(
                         'Welcome to',
                         style: TextStyle(
                           color: AppColors.textLight,
@@ -143,7 +390,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      Text(
+                      const Text(
                         'The CityGate Church',
                         style: TextStyle(
                           color: AppColors.textLight,
@@ -151,7 +398,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      Text(
+                      const Text(
                         'Where sons are raised',
                         style: TextStyle(
                           color: AppColors.textLight,
@@ -168,16 +415,99 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 12),
 
-            const Align(
+            // Dynamic user name section
+            Align(
               alignment: Alignment.centerLeft,
-              child: Text(
-                'James Afolayan',
-                style: TextStyle(
-                  color: AppColors.textLight,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              child: _currentUser != null
+                  ? Row(
+                      children: [
+                        if (_currentUser!.profileImageUrl != null)
+                          Container(
+                            width: 32,
+                            height: 32,
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: AppColors.textLight, width: 2),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Image.network(
+                                _currentUser!.profileImageUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) => 
+                                    const Icon(
+                                      Icons.person,
+                                      color: AppColors.textLight,
+                                      size: 20,
+                                    ),
+                              ),
+                            ),
+                          )
+                        else
+                          Container(
+                            width: 32,
+                            height: 32,
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: AppColors.primary.withOpacity(0.8),
+                              border: Border.all(color: AppColors.textLight, width: 2),
+                            ),
+                            child: const Icon(
+                              Icons.person,
+                              color: AppColors.textLight,
+                              size: 20,
+                            ),
+                          ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _currentUser!.name.isNotEmpty ? _currentUser!.name : 'Welcome',
+                                style: const TextStyle(
+                                  color: AppColors.textLight,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (_currentUser!.isOnline)
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: const BoxDecoration(
+                                        color: AppColors.success,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Text(
+                                      'Online',
+                                      style: TextStyle(
+                                        color: AppColors.textLight,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w300,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    )
+                  : const Text(
+                      'Welcome, Guest',  // Fallback when user info is not available
+                      style: TextStyle(
+                        color: AppColors.textLight,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
             ),
 
             const SizedBox(height: 6),
@@ -185,6 +515,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  bool _hasLiveContent() {
+    return _upcomingEvents.any((event) => event.isLive) || 
+           _recentContent.any((content) => content.isLive);
   }
 
   Widget _buildSectionHeader(String title) {
@@ -233,11 +568,37 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          Image.asset(
-                            event.thumbnailUrl ??
-                                'assets/images/events/son_of_god.jpg.png',
-                            fit: BoxFit.cover,
-                          ),
+                          event.thumbnailUrl != null && event.thumbnailUrl!.isNotEmpty
+                              ? Image.network(
+                                  event.thumbnailUrl!,
+                                  fit: BoxFit.cover,
+                                  loadingBuilder: (context, child, loadingProgress) {
+                                    if (loadingProgress == null) return child;
+                                    return Container(
+                                      color: AppColors.surfaceVariant,
+                                      child: const Center(
+                                        child: CircularProgressIndicator(),
+                                      ),
+                                    );
+                                  },
+                                  errorBuilder: (context, error, stackTrace) => 
+                                    Container(
+                                      color: AppColors.surfaceVariant,
+                                      child: const Icon(
+                                        Icons.image_not_supported,
+                                        size: 48,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                )
+                              : Container(
+                                  color: AppColors.surfaceVariant,
+                                  child: const Icon(
+                                    Icons.event,
+                                    size: 48,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
                           Container(
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
@@ -275,6 +636,26 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                     ),
                                   ),
+                                if (event.category != null)
+                                  Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: event.category!.color.withOpacity(0.8),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      event.category!.displayName,
+                                      style: const TextStyle(
+                                        color: AppColors.textLight,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
                                 const SizedBox(height: 8),
                                 Text(
                                   event.title,
@@ -288,7 +669,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  event.description,
+                                  '${event.description} • ${_formatEventDate(event.dateTime)}',
                                   style: const TextStyle(
                                     color: AppColors.textLight,
                                     fontSize: 12,
@@ -330,22 +711,32 @@ class _HomeScreenState extends State<HomeScreen> {
                 width: 50,
                 height: 50,
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
+                  color: activity.category?.color.withOpacity(0.1) ?? AppColors.surfaceVariant,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: activity.thumbnailUrl != null
+                child: activity.thumbnailUrl != null && activity.thumbnailUrl!.isNotEmpty
                     ? ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.asset(
+                        child: Image.network(
                           activity.thumbnailUrl!,
                           fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => Icon(
+                            activity.type == ContentType.video
+                                ? Icons.play_arrow
+                                : activity.type == ContentType.audio
+                                    ? Icons.headphones
+                                    : Icons.live_tv,
+                            color: activity.category?.color ?? AppColors.textSecondary,
+                          ),
                         ),
                       )
                     : Icon(
                         activity.type == ContentType.video
                             ? Icons.play_arrow
-                            : Icons.headphones,
-                        color: AppColors.textSecondary,
+                            : activity.type == ContentType.audio
+                                ? Icons.headphones
+                                : Icons.live_tv,
+                        color: activity.category?.color ?? AppColors.textSecondary,
                       ),
               ),
               const SizedBox(width: 12),
@@ -365,7 +756,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      activity.description,
+                      activity.pastor != null 
+                          ? '${activity.pastor} • ${activity.timeAgo}'
+                          : activity.timeAgo,
                       style: const TextStyle(
                         color: AppColors.textSecondary,
                         fontSize: 12,
@@ -377,6 +770,38 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (activity.isLive)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.live,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'LIVE',
+                        style: TextStyle(
+                          color: AppColors.textLight,
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  if (activity.duration != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        activity.formattedDuration,
+                        style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ],
           ),
         );
@@ -384,55 +809,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  List<Event> _getMockUpcomingEvents() {
-    const defaultThumb = 'assets/images/events/son_of_god.jpg.png';
-    return [
-      Event(
-        id: '1',
-        title: 'PRE-CONFERENCE SERVICE\nTHE SON OF GOD',
-        description: 'Image & Glory Conference',
-        thumbnailUrl: defaultThumb,
-        dateTime: DateTime.now().add(const Duration(hours: 2)),
-        isLive: true,
-        category: ServiceCategory.feastOfGlory,
-      ),
-      Event(
-        id: '2',
-        title: 'Believers\' Meeting',
-        description: 'Fellowship',
-        thumbnailUrl: defaultThumb,
-        dateTime: DateTime.now().add(const Duration(days: 1)),
-        isLive: false,
-      ),
-      Event(
-        id: '3',
-        title: 'THIS GOSPEL OF\nTHE KINGDOM',
-        description: 'Kingdom Herald Summit',
-        thumbnailUrl: defaultThumb,
-        dateTime: DateTime.now().add(const Duration(days: 3)),
-        isLive: false,
-      ),
-    ];
-  }
+  String _formatEventDate(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = dateTime.difference(now);
 
-  List<Content> _getMockRecentContent() {
-    return [
-      Content(
-        id: '1',
-        title: 'Feast of Glory Service - "Faith Over Fear"',
-        description: 'Pastor Adedayo • 2 hours ago',
-        type: ContentType.video,
-        createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-        category: ServiceCategory.feastOfGlory,
-      ),
-      Content(
-        id: '2',
-        title: 'Daily Devotion - November 17',
-        description: 'Psalms 23:1 • This morning',
-        type: ContentType.audio,
-        createdAt: DateTime.now().subtract(const Duration(hours: 6)),
-      ),
-    ];
+    if (difference.inDays == 0) {
+      return 'Today';
+    } else if (difference.inDays == 1) {
+      return 'Tomorrow';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays} days';
+    } else {
+      return '${dateTime.day}/${dateTime.month}';
+    }
   }
 }
 
@@ -459,5 +848,5 @@ class _LogoBox extends StatelessWidget {
         fit: BoxFit.contain,
       ),
     );
-    }
+  }
 }

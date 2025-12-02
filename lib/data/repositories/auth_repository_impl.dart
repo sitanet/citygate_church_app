@@ -1,64 +1,68 @@
-import 'package:dartz/dartz.dart';
-import '../../core/error/failures.dart';
 import '../../domain/entities/user.dart';
 import '../../domain/repositories/auth_repository.dart';
-import '../datasources/mock_data_source.dart';
+import '../datasources/remote_data_source.dart';
+import '../../core/network/api_client.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
+  final RemoteDataSource remoteDataSource;
+  final ApiClient _apiClient = ApiClient();
+
+  AuthRepositoryImpl({required this.remoteDataSource});
+
   @override
-  Future<Either<Failure, User>> signIn(String email, String password) async {
+  Future<User> signIn(String username, String password) async {
     try {
-      final user = await MockDataSource.mockSignIn(email, password);
-      return Right(user);
+      final result = await remoteDataSource.signIn(username, password);
+      return result['user'];
     } catch (e) {
-      return const Left(AuthFailure('Invalid credentials'));
+      throw Exception('Sign in failed: ${e.toString()}');
     }
   }
 
   @override
-  Future<Either<Failure, User>> signUp(String name, String email, String password) async {
+  Future<User> signUp({
+    required String username,
+    required String email,
+    required String firstName,
+    required String lastName,
+    required String password,
+    required String confirmPassword,
+  }) async {
     try {
-      // Mock sign up implementation
-      await Future.delayed(const Duration(seconds: 1));
-      return const Right(UserModel(
-        id: '2',
-        name: 'New User',
-        email: 'newuser@email.com',
-        isOnline: true,
-      ));
+      final result = await remoteDataSource.signUp(
+        username: username,
+        email: email,
+        firstName: firstName,
+        lastName: lastName,
+        password: password,
+        confirmPassword: confirmPassword,
+      );
+      return result['user'];
     } catch (e) {
-      return const Left(AuthFailure('Sign up failed'));
+      throw Exception('Sign up failed: ${e.toString()}');
     }
   }
 
   @override
-  Future<Either<Failure, void>> signOut() async {
+  Future<void> signOut() async {
     try {
-      await Future.delayed(const Duration(milliseconds: 500));
-      return const Right(null);
+      await remoteDataSource.signOut();
     } catch (e) {
-      return const Left(AuthFailure('Sign out failed'));
+      throw Exception('Sign out failed: ${e.toString()}');
     }
   }
 
   @override
-  Future<Either<Failure, User?>> getCurrentUser() async {
+  Future<User> getCurrentUser() async {
     try {
-      // Mock getting current user from storage
-      await Future.delayed(const Duration(milliseconds: 200));
-      return const Right(null); // No user stored
+      return await remoteDataSource.getCurrentUser();
     } catch (e) {
-      return const Left(AuthFailure('Failed to get current user'));
+      throw Exception('Failed to get current user: ${e.toString()}');
     }
   }
 
   @override
-  Future<Either<Failure, void>> forgotPassword(String email) async {
-    try {
-      await Future.delayed(const Duration(seconds: 1));
-      return const Right(null);
-    } catch (e) {
-      return const Left(AuthFailure('Failed to send password reset email'));
-    }
+  Future<bool> isAuthenticated() async {
+    return _apiClient.authToken != null;
   }
 }

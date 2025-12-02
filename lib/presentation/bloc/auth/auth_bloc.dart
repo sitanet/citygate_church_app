@@ -2,29 +2,52 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../domain/entities/user.dart';
 import '../../../domain/usecases/auth/sign_in.dart';
-import '../../../core/constants/app_constants.dart';
+import '../../../domain/usecases/auth/sign_up.dart';
+import '../../../domain/usecases/auth/sign_out.dart';
+import '../../../core/usecase/usecase.dart';
 
 // Events
 abstract class AuthEvent extends Equatable {
   const AuthEvent();
 
   @override
-  List<Object> get props => [];
+  List<Object?> get props => [];
 }
 
 class SignInRequested extends AuthEvent {
-  final String email;
+  final String username;
   final String password;
 
-  const SignInRequested({required this.email, required this.password});
+  const SignInRequested({required this.username, required this.password});
 
   @override
-  List<Object> get props => [email, password];
+  List<Object?> get props => [username, password];
+}
+
+class SignUpRequested extends AuthEvent {
+  final String username;
+  final String email;
+  final String firstName;
+  final String lastName;
+  final String password;
+  final String confirmPassword;
+
+  const SignUpRequested({
+    required this.username,
+    required this.email,
+    required this.firstName,
+    required this.lastName,
+    required this.password,
+    required this.confirmPassword,
+  });
+
+  @override
+  List<Object?> get props => [username, email, firstName, lastName, password, confirmPassword];
 }
 
 class SignOutRequested extends AuthEvent {}
 
-class CheckAuthStatus extends AuthEvent {}
+class AuthStatusChecked extends AuthEvent {}
 
 // States
 abstract class AuthState extends Equatable {
@@ -44,7 +67,7 @@ class AuthAuthenticated extends AuthState {
   const AuthAuthenticated({required this.user});
 
   @override
-  List<Object> get props => [user];
+  List<Object?> get props => [user];
 }
 
 class AuthUnauthenticated extends AuthState {}
@@ -55,17 +78,24 @@ class AuthError extends AuthState {
   const AuthError({required this.message});
 
   @override
-  List<Object> get props => [message];
+  List<Object?> get props => [message];
 }
 
-// Bloc
+// BLoC
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final SignIn signIn;
+  final SignUp signUp;
+  final SignOut signOut;
 
-  AuthBloc({required this.signIn}) : super(AuthInitial()) {
+  AuthBloc({
+    required this.signIn,
+    required this.signUp,
+    required this.signOut,
+  }) : super(AuthInitial()) {
     on<SignInRequested>(_onSignInRequested);
+    on<SignUpRequested>(_onSignUpRequested);
     on<SignOutRequested>(_onSignOutRequested);
-    on<CheckAuthStatus>(_onCheckAuthStatus);
+    on<AuthStatusChecked>(_onAuthStatusChecked);
   }
 
   Future<void> _onSignInRequested(
@@ -73,29 +103,56 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     Emitter<AuthState> emit,
   ) async {
     emit(AuthLoading());
+    try {
+      final user = await signIn(SignInParams(
+        username: event.username,
+        password: event.password,
+      ));
+      emit(AuthAuthenticated(user: user));
+    } catch (e) {
+      emit(AuthError(message: e.toString()));
+    }
+  }
 
-    final result = await signIn(SignInParams(
-      email: event.email,
-      password: event.password,
-    ));
-
-    result.fold(
-      (failure) => emit(AuthError(message: failure.message)),
-      (user) => emit(AuthAuthenticated(user: user)),
-    );
+  Future<void> _onSignUpRequested(
+    SignUpRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      final user = await signUp(SignUpParams(
+        username: event.username,
+        email: event.email,
+        firstName: event.firstName,
+        lastName: event.lastName,
+        password: event.password,
+        confirmPassword: event.confirmPassword,
+      ));
+      emit(AuthAuthenticated(user: user));
+    } catch (e) {
+      emit(AuthError(message: e.toString()));
+    }
   }
 
   Future<void> _onSignOutRequested(
     SignOutRequested event,
     Emitter<AuthState> emit,
   ) async {
-    emit(AuthUnauthenticated());
+    emit(AuthLoading());
+    try {
+      await signOut(NoParams());
+      emit(AuthUnauthenticated());
+    } catch (e) {
+      emit(AuthError(message: e.toString()));
+    }
   }
 
-  Future<void> _onCheckAuthStatus(
-    CheckAuthStatus event,
+  Future<void> _onAuthStatusChecked(
+    AuthStatusChecked event,
     Emitter<AuthState> emit,
   ) async {
-    emit(AuthUnauthenticated()); // For demo purposes
+    // Check if user is already authenticated
+    // This can be implemented by checking stored tokens
+    emit(AuthUnauthenticated());
   }
 }

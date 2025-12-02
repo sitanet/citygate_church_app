@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.the_citygate_church"
-    compileSdk = 34
+    compileSdk = 35
     ndkVersion = "27.0.12077973"
 
     defaultConfig {

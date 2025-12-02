@@ -13,6 +13,9 @@ dependencies:
   
   cupertino_icons: ^1.0.8
   equatable: ^2.0.5
+  http: ^1.1.0
+  shared_preferences: ^2.2.2
+  flutter_bloc: ^8.1.3
 
 dev_dependencies:
   flutter_test:
@@ -28,5 +31,3 @@ flutter:
     - assets/images/events/
     - assets/images/profile/
     - assets/icons/
-
-

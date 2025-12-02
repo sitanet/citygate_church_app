@@ -11,12 +11,12 @@ abstract class HomeEvent extends Equatable {
   const HomeEvent();
 
   @override
-  List<Object> get props => [];
+  List<Object?> get props => [];
 }
 
-class LoadHomeData extends HomeEvent {}
+class HomeDataRequested extends HomeEvent {}
 
-class RefreshHomeData extends HomeEvent {}
+class RefreshRequested extends HomeEvent {}
 
 // States
 abstract class HomeState extends Equatable {
@@ -40,7 +40,7 @@ class HomeLoaded extends HomeState {
   });
 
   @override
-  List<Object> get props => [recentContent, upcomingEvents];
+  List<Object?> get props => [recentContent, upcomingEvents];
 }
 
 class HomeError extends HomeState {
@@ -49,10 +49,10 @@ class HomeError extends HomeState {
   const HomeError({required this.message});
 
   @override
-  List<Object> get props => [message];
+  List<Object?> get props => [message];
 }
 
-// Bloc
+// BLoC
 class HomeBloc extends Bloc<HomeEvent, HomeState> {
   final GetRecentContent getRecentContent;
   final GetUpcomingEvents getUpcomingEvents;
@@ -61,40 +61,36 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
     required this.getRecentContent,
     required this.getUpcomingEvents,
   }) : super(HomeInitial()) {
-    on<LoadHomeData>(_onLoadHomeData);
-    on<RefreshHomeData>(_onRefreshHomeData);
+    on<HomeDataRequested>(_onHomeDataRequested);
+    on<RefreshRequested>(_onRefreshRequested);
   }
 
-  Future<void> _onLoadHomeData(
-    LoadHomeData event,
+  Future<void> _onHomeDataRequested(
+    HomeDataRequested event,
     Emitter<HomeState> emit,
   ) async {
     emit(HomeLoading());
-    await _loadData(emit);
+    await _loadHomeData(emit);
   }
 
-  Future<void> _onRefreshHomeData(
-    RefreshHomeData event,
+  Future<void> _onRefreshRequested(
+    RefreshRequested event,
     Emitter<HomeState> emit,
   ) async {
-    await _loadData(emit);
+    await _loadHomeData(emit);
   }
 
-  Future<void> _loadData(Emitter<HomeState> emit) async {
-    final recentContentResult = await getRecentContent(NoParams());
-    final upcomingEventsResult = await getUpcomingEvents(NoParams());
-
-    if (recentContentResult.isLeft() || upcomingEventsResult.isLeft()) {
-      emit(const HomeError(message: 'Failed to load home data'));
-      return;
+  Future<void> _loadHomeData(Emitter<HomeState> emit) async {
+    try {
+      final recentContent = await getRecentContent(NoParams());
+      final upcomingEvents = await getUpcomingEvents(NoParams());
+      
+      emit(HomeLoaded(
+        recentContent: recentContent,
+        upcomingEvents: upcomingEvents,
+      ));
+    } catch (e) {
+      emit(HomeError(message: e.toString()));
     }
-
-    final recentContent = recentContentResult.getOrElse(() => []);
-    final upcomingEvents = upcomingEventsResult.getOrElse(() => []);
-
-    emit(HomeLoaded(
-      recentContent: recentContent,
-      upcomingEvents: upcomingEvents,
-    ));
   }
 }

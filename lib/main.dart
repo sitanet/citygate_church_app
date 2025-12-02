@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
+import 'core/network/api_client.dart';
 import 'core/theme/app_theme.dart';
 import 'screens/splash_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/sign_in_screen.dart';
-import 'screens/sign_up_screen.dart'; // Add this import
+import 'screens/sign_up_screen.dart';
 import 'screens/main_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize API client
+  await ApiClient().initialize();
+  
   runApp(const CityGateChurchApp());
 }
 
@@ -38,7 +44,15 @@ class _AppNavigatorState extends State<AppNavigator> {
   @override
   void initState() {
     super.initState();
+    _checkAuthenticationStatus();
     _startSplashTimer();
+  }
+
+  void _checkAuthenticationStatus() {
+    final apiClient = ApiClient();
+    setState(() {
+      _isAuthenticated = apiClient.authToken != null;
+    });
   }
 
   void _startSplashTimer() {

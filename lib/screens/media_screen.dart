@@ -1,31 +1,9 @@
 import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
-import 'messages_list_screen.dart';
-
-class MediaCategory {
-  final String id;
-  final String title;
-  final List<Color> gradient;
-  final String? image;
-
-  const MediaCategory({
-    required this.id,
-    required this.title,
-    required this.gradient,
-    this.image,
-  });
-}
-
-class VideoItem {
-  final String title;
-  final String image;
-  final Duration duration;
-  const VideoItem({
-    required this.title,
-    required this.image,
-    required this.duration,
-  });
-}
+import '../core/constants/app_constants.dart';
+import '../domain/entities/content.dart';
+import '../data/datasources/remote_data_source.dart';
+import '../data/repositories/content_repository_impl.dart';
 
 class MediaScreen extends StatefulWidget {
   const MediaScreen({Key? key}) : super(key: key);
@@ -34,54 +12,102 @@ class MediaScreen extends StatefulWidget {
   State<MediaScreen> createState() => _MediaScreenState();
 }
 
-class _MediaScreenState extends State<MediaScreen> {
-  int _typeIndex = 0; // 0=Audio, 1=Video, 2=Transcript
+class _MediaScreenState extends State<MediaScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  late ContentRepositoryImpl _contentRepository;
+  
+  Map<ContentType, List<Content>> _contentByType = {};
+  Map<ContentType, bool> _loadingStates = {};
+  Map<ContentType, String?> _errorMessages = {};
+  
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
-  final List<MediaCategory> _categories = const [
-    MediaCategory(
-      id: 'morning_dew',
-      title: 'The Morning Dew',
-      gradient: [Color(0xFFCBB57A), Color(0xFF8F7A38)],
-      image: 'assets/images/events/son_of_god.jpg.png',
-    ),
-    MediaCategory(
-      id: 'feast_of_glory',
-      title: 'Feast of Glory Service',
-      gradient: [Color(0xFFFF5A4E), Color(0xFFE74625)],
-      image: 'assets/images/events/son_of_god.jpg.png',
-    ),
-    MediaCategory(
-      id: 'word_and_prayer',
-      title: 'Word and Prayer',
-      gradient: [Color(0xFF8A2A2A), Color(0xFF5E1B1B)],
-      image: 'assets/images/events/son_of_god.jpg.png',
-    ),
-    MediaCategory(
-      id: 'school_of_christ',
-      title: 'The School of Christ',
-      gradient: [Color(0xFF222222), Color(0xFF000000)],
-      image: 'assets/images/events/son_of_god.jpg.png',
-    ),
-    MediaCategory(
-      id: 'kingdom_business',
-      title: 'Kingdom Business',
-      gradient: [Color(0xFF8A2BE2), Color(0xFF5C1FAE)],
-      image: 'assets/images/events/son_of_god.jpg.png',
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _contentRepository = ContentRepositoryImpl(
+      remoteDataSource: RemoteDataSource(),
+    );
+    
+    // Initialize states
+    for (final type in ContentType.values) {
+      _contentByType[type] = [];
+      _loadingStates[type] = false;
+      _errorMessages[type] = null;
+    }
+    
+    // Load initial content for first tab (Videos)
+    _loadContent(ContentType.video);
+    
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) {
+        final contentType = ContentType.values[_tabController.index];
+        if (_contentByType[contentType]!.isEmpty && !_loadingStates[contentType]!) {
+          _loadContent(contentType);
+        }
+      }
+    });
+  }
 
-  final List<VideoItem> _videos = const [
-    VideoItem(
-      title: 'PRE-CONFERENCE SERVICE — THE SON OF GOD',
-      image: 'assets/images/events/son_of_god.jpg.png',
-      duration: Duration(minutes: 3, seconds: 46),
-    ),
-    VideoItem(
-      title: 'THIS GOSPEL OF THE KINGDOM',
-      image: 'assets/images/events/son_of_god.jpg.png',
-      duration: Duration(minutes: 4, seconds: 12),
-    ),
-  ];
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadContent(ContentType type) async {
+    try {
+      setState(() {
+        _loadingStates[type] = true;
+        _errorMessages[type] = null;
+      });
+
+      final content = await _contentRepository.getContent(
+        type: type.name,
+        search: _searchQuery.isNotEmpty ? _searchQuery : null,
+      );
+
+      if (mounted) {
+        setState(() {
+          _contentByType[type] = content;
+          _loadingStates[type] = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessages[type] = e.toString().replaceFirst('Exception: ', '');
+          _loadingStates[type] = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _refresh(ContentType type) async {
+    await _loadContent(type);
+  }
+
+  void _performSearch() {
+    setState(() {
+      _searchQuery = _searchController.text.trim();
+    });
+    
+    final currentType = ContentType.values[_tabController.index];
+    _loadContent(currentType);
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+    });
+    
+    final currentType = ContentType.values[_tabController.index];
+    _loadContent(currentType);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -90,166 +116,309 @@ class _MediaScreenState extends State<MediaScreen> {
       appBar: AppBar(
         title: const Text('Media'),
         automaticallyImplyLeading: false,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-        children: [
-          _buildTypeSwitcher(),
-          const SizedBox(height: 16),
-          if (_typeIndex == 0) ...[
-            ..._categories.map(
-              (c) => _CategoryCard(
-                category: c,
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => MessagesListScreen(
-                        initialCategory: c,
-                        allCategories: _categories,
-                        initialTypeIndex: _typeIndex,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ] else if (_typeIndex == 1) ...[
-            ..._videos.map((v) => _VideoCard(item: v)),
-          ] else ...[
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [AppStyles.cardShadow],
-              ),
-              child: const Text(
-                'Transcripts will appear here.',
-                style: TextStyle(
-                  color: AppColors.onSurface,
-                  fontWeight: FontWeight.w700,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(100),
+          child: Column(
+            children: [
+              // Search Bar
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search content...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: _clearSearch,
+                          )
+                        : null,
+                  ),
+                  onSubmitted: (_) => _performSearch(),
                 ),
               ),
-            ),
-          ],
+              // Tabs
+              TabBar(
+                controller: _tabController,
+                tabs: const [
+                  Tab(text: 'Videos'),
+                  Tab(text: 'Audio'),
+                  Tab(text: 'Live'),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildContentTab(ContentType.video),
+          _buildContentTab(ContentType.audio),
+          _buildContentTab(ContentType.live),
         ],
       ),
     );
   }
 
-  Widget _buildTypeSwitcher() {
-    final tabs = const ['Audio', 'Video', 'Transcript'];
-    return Container(
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [AppStyles.cardShadow],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: List.generate(tabs.length, (i) {
-          final selected = _typeIndex == i;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => setState(() => _typeIndex = i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  color: selected ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(22),
-                  border: selected
-                      ? const Border.fromBorderSide(
-                          BorderSide(color: AppColors.secondary, width: 1.2),
-                        )
-                      : null,
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  tabs[i],
-                  style: TextStyle(
-                    color: selected ? AppColors.secondary : AppColors.textSecondary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }),
+  Widget _buildContentTab(ContentType type) {
+    final isLoading = _loadingStates[type] ?? false;
+    final errorMessage = _errorMessages[type];
+    final content = _contentByType[type] ?? [];
+
+    if (isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Loading content...'),
+          ],
+        ),
+      );
+    }
+
+    if (errorMessage != null) {
+      return _buildErrorView(errorMessage, () => _loadContent(type));
+    }
+
+    if (content.isEmpty) {
+      return _buildEmptyView(type);
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => _refresh(type),
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: content.length,
+        itemBuilder: (context, index) {
+          return _buildContentCard(content[index]);
+        },
       ),
     );
   }
-}
 
-// AUDIO category card
-class _CategoryCard extends StatelessWidget {
-  final MediaCategory category;
-  final VoidCallback onTap;
-
-  const _CategoryCard({required this.category, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Ink(
-          height: 86,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
-              colors: category.gradient,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+  Widget _buildErrorView(String errorMessage, VoidCallback onRetry) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.error_outline,
+              size: 80,
+              color: AppColors.error,
             ),
-          ),
-          child: Stack(
+            const SizedBox(height: 24),
+            Text(
+              'Failed to load content',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              errorMessage,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try Again'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyView(ContentType type) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              type == ContentType.video
+                  ? Icons.video_library_outlined
+                  : type == ContentType.audio
+                      ? Icons.audiotrack_outlined
+                      : Icons.live_tv_outlined,
+              size: 80,
+              color: AppColors.textSecondary,
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'No ${type.name} content available',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _searchQuery.isNotEmpty 
+                  ? 'No results found for "$_searchQuery"'
+                  : 'Check back later for new ${type.name} content',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (_searchQuery.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: _clearSearch,
+                child: const Text('Clear search'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContentCard(Content content) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: InkWell(
+        onTap: () {
+          _playContent(content);
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
             children: [
-              if (category.image != null)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: ClipRRect(
-                    borderRadius: const BorderRadius.only(
-                      topRight: Radius.circular(16),
-                      bottomRight: Radius.circular(16),
-                    ),
-                    child: ColorFiltered(
-                      colorFilter: ColorFilter.mode(
-                        Colors.black.withOpacity(0.35),
-                        BlendMode.darken,
-                      ),
-                      child: Image.asset(
-                        category.image!,
-                        height: double.infinity,
-                        width: 140,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
+              // Thumbnail/Icon
+              Container(
+                width: 80,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: content.category?.color.withOpacity(0.1) ?? AppColors.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
+                child: Stack(
                   children: [
-                    Expanded(
-                      child: Text(
-                        category.title,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                    if (content.thumbnailUrl != null && content.thumbnailUrl!.isNotEmpty)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          content.thumbnailUrl!,
+                          width: 80,
+                          height: 60,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return const Center(child: CircularProgressIndicator());
+                          },
+                          errorBuilder: (context, error, stackTrace) => _buildDefaultIcon(content),
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      )
+                    else
+                      _buildDefaultIcon(content),
+                    if (content.isLive)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.live,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'LIVE',
+                            style: TextStyle(
+                              color: AppColors.textLight,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    const Icon(Icons.chevron_right, color: Colors.white),
                   ],
                 ),
+              ),
+              const SizedBox(width: 16),
+              // Content Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      content.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    if (content.pastor != null)
+                      Text(
+                        content.pastor!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    if (content.category != null)
+                      Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: content.category!.color.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          content.category!.displayName,
+                          style: TextStyle(
+                            color: content.category!.color,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(
+                          content.timeAgo,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                        if (content.duration != null) ...[
+                          const Text(' • '),
+                          Text(
+                            content.formattedDuration,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // Action Button
+              IconButton(
+                onPressed: () {
+                  _showContentOptionsBottomSheet(content);
+                },
+                icon: const Icon(Icons.more_vert),
               ),
             ],
           ),
@@ -257,104 +426,146 @@ class _CategoryCard extends StatelessWidget {
       ),
     );
   }
-}
 
-// VIDEO card UI (centered, black controls)
-class _VideoCard extends StatelessWidget {
-  final VideoItem item;
-  const _VideoCard({required this.item});
-
-  String _fmt(Duration d) {
-    final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$mm:$ss';
+  Widget _buildDefaultIcon(Content content) {
+    return Center(
+      child: Icon(
+        content.type == ContentType.video
+            ? Icons.play_circle_filled
+            : content.type == ContentType.audio
+                ? Icons.audiotrack
+                : Icons.live_tv,
+        size: 32,
+        color: content.category?.color ?? AppColors.primary,
+      ),
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [AppStyles.cardShadow],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Artwork
-            ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
+  void _showContentOptionsBottomSheet(Content content) {
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return SafeArea(
+          child: Wrap(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.play_arrow),
+                title: Text(content.isLive ? 'Watch Live' : 'Play'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _playContent(content);
+                },
               ),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.asset(item.image, fit: BoxFit.cover),
-                    Positioned.fill(
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Play "${item.title}"')),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
+              ListTile(
+                leading: const Icon(Icons.share),
+                title: const Text('Share'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _shareContent(content);
+                },
+              ),
+              if (!content.isLive)
+                ListTile(
+                  leading: const Icon(Icons.download),
+                  title: const Text('Download'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _downloadContent(content);
+                  },
                 ),
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Details'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showContentDetails(content);
+                },
               ),
-            ),
-            // Controls centered, black icons
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.skip_previous_rounded, color: Colors.black),
-                  ),
-                  const SizedBox(width: 18),
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.black, // black play button
-                    ),
-                    child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
-                  ),
-                  const SizedBox(width: 18),
-                  IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.skip_next_rounded, color: Colors.black),
-                  ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _playContent(Content content) {
+    // TODO: Navigate to video/audio player
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Playing: ${content.title}'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _shareContent(Content content) {
+    // TODO: Implement content sharing
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Sharing: ${content.title}'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _downloadContent(Content content) {
+    // TODO: Implement content download
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Downloading: ${content.title}'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showContentDetails(Content content) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(content.title),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (content.pastor != null) ...[
+                  Text('Pastor: ${content.pastor}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
                 ],
-              ),
-            ),
-            // Duration aligned right
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Row(
-                children: [
-                  const Spacer(),
-                  Text(
-                    _fmt(item.duration),
-                    style: const TextStyle(color: AppColors.textSecondary),
-                  ),
+                if (content.scripture != null) ...[
+                  Text('Scripture: ${content.scripture}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
                 ],
-              ),
+                if (content.category != null) ...[
+                  Text('Category: ${content.category!.displayName}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                ],
+                Text(content.description),
+                const SizedBox(height: 8),
+                Text('Published: ${content.timeAgo}'),
+                if (content.duration != null) ...[
+                  const SizedBox(height: 4),
+                  Text('Duration: ${content.formattedDuration}'),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _playContent(content);
+              },
+              child: Text(content.isLive ? 'Watch Live' : 'Play'),
             ),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 }

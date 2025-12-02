@@ -6,12 +6,12 @@ class UserModel extends User {
     required super.name,
     required super.email,
     super.profileImageUrl,
-    super.isOnline,
+    super.isOnline = false,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
     return UserModel(
-      id: json['id'] ?? '',
+      id: json['id'].toString(),
       name: json['name'] ?? '',
       email: json['email'] ?? '',
       profileImageUrl: json['profile_image_url'],

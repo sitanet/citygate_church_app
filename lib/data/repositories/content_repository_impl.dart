@@ -1,64 +1,63 @@
-import 'package:dartz/dartz.dart';
-import '../../core/error/failures.dart';
 import '../../domain/entities/content.dart';
 import '../../domain/entities/event.dart';
 import '../../domain/repositories/content_repository.dart';
-import '../datasources/mock_data_source.dart';
+import '../datasources/remote_data_source.dart';
 
 class ContentRepositoryImpl implements ContentRepository {
+  final RemoteDataSource remoteDataSource;
+
+  ContentRepositoryImpl({required this.remoteDataSource});
+
   @override
-  Future<Either<Failure, List<Content>>> getRecentContent() async {
+  Future<List<Content>> getRecentContent() async {
     try {
-      final content = await MockDataSource.getMockRecentContent();
-      return Right(content);
+      return await remoteDataSource.getRecentContent();
     } catch (e) {
-      return const Left(ServerFailure('Failed to fetch recent content'));
+      throw Exception('Failed to get recent content: ${e.toString()}');
     }
   }
 
   @override
-  Future<Either<Failure, List<Event>>> getUpcomingEvents() async {
+  Future<List<Content>> getLiveContent() async {
     try {
-      final events = await MockDataSource.getMockUpcomingEvents();
-      return Right(events);
+      return await remoteDataSource.getLiveContent();
     } catch (e) {
-      return const Left(ServerFailure('Failed to fetch upcoming events'));
+      throw Exception('Failed to get live content: ${e.toString()}');
     }
   }
 
   @override
-  Future<Either<Failure, List<Content>>> searchContent(String query) async {
+  Future<List<Content>> getContent({
+    String? type,
+    String? category,
+    String? search,
+  }) async {
     try {
-      final allContent = await MockDataSource.getMockRecentContent();
-      final filtered = allContent.where((content) =>
-          content.title.toLowerCase().contains(query.toLowerCase()) ||
-          content.description.toLowerCase().contains(query.toLowerCase())).toList();
-      return Right(filtered);
+      return await remoteDataSource.getContent(
+        type: type,
+        category: category,
+        search: search,
+      );
     } catch (e) {
-      return const Left(ServerFailure('Failed to search content'));
+      throw Exception('Failed to get content: ${e.toString()}');
     }
   }
 
   @override
-  Future<Either<Failure, List<Content>>> getContentByCategory(String category) async {
+  Future<List<Event>> getUpcomingEvents() async {
     try {
-      final allContent = await MockDataSource.getMockRecentContent();
-      final filtered = allContent.where((content) =>
-          content.category?.name == category).toList();
-      return Right(filtered);
+      return await remoteDataSource.getUpcomingEvents();
     } catch (e) {
-      return const Left(ServerFailure('Failed to fetch content by category'));
+      throw Exception('Failed to get upcoming events: ${e.toString()}');
     }
   }
 
   @override
-  Future<Either<Failure, Content?>> getLiveContent() async {
+  Future<List<Event>> getEvents() async {
     try {
-      final allContent = await MockDataSource.getMockRecentContent();
-      final liveContent = allContent.where((content) => content.isLive).toList();
-      return Right(liveContent.isNotEmpty ? liveContent.first : null);
+      return await remoteDataSource.getEvents();
     } catch (e) {
-      return const Left(ServerFailure('Failed to fetch live content'));
+      throw Exception('Failed to get events: ${e.toString()}');
     }
   }
 }
